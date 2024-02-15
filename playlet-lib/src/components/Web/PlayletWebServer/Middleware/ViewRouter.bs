@@ -9,7 +9,9 @@ namespace Http
         function new(server as object)
             super()
 
-            m.appController = server.task.appController
+            task = server.task
+            m.appController = task.appController
+            m.continueWatchingContent = task.continueWatching.content
         end function
 
         @get("/api/view/open")
@@ -21,7 +23,7 @@ namespace Http
             authorId = request.query.authorId
 
             if not StringUtils.IsNullOrEmpty(playlistId)
-                contentNode = InvidiousContent.ToPlaylistContentNode(invalid, { playlistId: playlistId }, invalid)
+                contentNode = InvidiousContent.ToPlaylistContentNode(invalid, { playlistId: playlistId }, invalid, m.continueWatchingContent)
                 PlaylistUtils.Open(contentNode, m.appController)
                 if VideoUtils.IsVideoPlayerOpen() and VideoUtils.IsVideoPlayerFullScreen()
                     VideoUtils.ToggleVideoPictureInPicture()

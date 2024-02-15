@@ -228,7 +228,11 @@ namespace Invidious
                 }
             end if
 
-            instance = m.GetInstance()
+            if feedSource.apiType = "Local"
+                instance = "http://127.0.0.1:8888"
+            else
+                instance = m.GetInstance()
+            end if
 
             request = HttpClient.Get(instance + endpoint.url)
 
@@ -240,8 +244,11 @@ namespace Invidious
                         error: ERROR_NOT_AUTHENTICATED
                     }
                 end if
-                request.Url(authToken.instance + endpoint.url)
-                request.Headers(m.GetAuthenticationHeaders(authToken.token))
+
+                if feedSource.apiType <> "Local"
+                    request.Url(authToken.instance + endpoint.url)
+                    request.Headers(m.GetAuthenticationHeaders(authToken.token))
+                end if
             end if
 
             if endpoint.queryParams <> invalid
@@ -602,6 +609,20 @@ We apologize for the inconvenience.`
 
             url = `${authToken.instance}${Invidious.AUTH_SUBSCRIPTIONS}/${channelId}`
             request = HttpClient.Delete(url)
+            request.Headers(m.GetAuthenticationHeaders(authToken.token))
+            request.Cancellation(cancellation)
+
+            return request.Await()
+        end function
+
+        function GetWatchHistory(page as integer, max_results as integer, cancellation = invalid as object) as object
+            authToken = m.node.authToken
+            if authToken = invalid
+                return invalid
+            end if
+
+            url = `${authToken.instance}${Invidious.HISTORY_ENDPOINT}?page=${page}&max_results=${max_results}`
+            request = HttpClient.Get(url)
             request.Headers(m.GetAuthenticationHeaders(authToken.token))
             request.Cancellation(cancellation)
 

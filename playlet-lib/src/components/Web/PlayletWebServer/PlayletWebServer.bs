@@ -1,5 +1,6 @@
 import "pkg:/components/parts/AutoBind/OnNodeReadyNoOp.bs"
 import "pkg:/components/Web/PlayletWebServer/Middleware/BookmarksRouter.bs"
+import "pkg:/components/Web/PlayletWebServer/Middleware/ContinueWatchingRouter.bs"
 import "pkg:/components/Web/PlayletWebServer/Middleware/DashRouter.bs"
 import "pkg:/components/Web/PlayletWebServer/Middleware/HomeLayoutRouter.bs"
 import "pkg:/components/Web/PlayletWebServer/Middleware/HomeRouter.bs"
@@ -11,6 +12,7 @@ import "pkg:/components/Web/PlayletWebServer/Middleware/RegistryRouter.bs"
 import "pkg:/components/Web/PlayletWebServer/Middleware/SearchHistoryRouter.bs"
 import "pkg:/components/Web/PlayletWebServer/Middleware/StateApiRouter.bs"
 import "pkg:/components/Web/PlayletWebServer/Middleware/ViewRouter.bs"
+import "pkg:/components/Web/PlayletWebServer/Middleware/WatchHistoryRouter.bs"
 import "pkg:/components/Web/WebServer/Middleware/CorsMiddleware.bs"
 import "pkg:/components/Web/WebServer/Middleware/EtagMiddleware.bs"
 import "pkg:/components/Web/WebServer/Middleware/HttpStaticFilesRouter.bs"
@@ -40,6 +42,8 @@ function SetupRoutes(server as object)
     server.UseRouter(new Http.DashRouter(server))
     server.UseRouter(new Http.PreferencesRouter(server))
     server.UseRouter(new Http.InvidiousRouter(server))
+    server.UseRouter(new Http.ContinueWatchingRouter(server))
+    server.UseRouter(new Http.WatchHistoryRouter(server))
     server.UseRouter(new Http.PlayQueueRouter(server))
     server.UseRouter(new Http.BookmarksRouter(server))
     server.UseRouter(new Http.HomeLayoutRouter(server))

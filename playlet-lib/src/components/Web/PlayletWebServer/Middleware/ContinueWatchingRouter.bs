@@ -1,0 +1,111 @@
+import "pkg:/components/Services/ContinueWatching/ContinueWatchingUtils.bs"
+import "pkg:/components/Services/Invidious/InvidiousService.bs"
+import "pkg:/source/utils/MathUtils.bs"
+
+namespace Http
+
+    const CONTINUE_WATCHING_PAGE_SIZE = 5
+
+    class ContinueWatchingRouter extends HttpRouter
+
+        function new(server as object)
+            super()
+
+            task = server.task
+            m.preferencesNode = task.preferences
+            m.continueWatchingNode = task.continueWatching
+            m.invidiousNode = task.invidious
+            m.invidiousService = new Invidious.InvidiousService(m.invidiousNode)
+        end function
+
+        @get("/api/continue-watching")
+        function GetContinueWatching(context as object) as boolean
+            request = context.request
+            response = context.response
+
+            isEnabled = m.preferencesNode["continue_watching.enabled"] = true
+            if not isEnabled
+                response.Default(403, "Continue watching is disabled from the settings.")
+                return true
+            end if
+
+            page = 1
+            if not StringUtils.IsNullOrEmpty(request.query.page)
+                page = request.query.page.ToInt()
+                page = MathUtils.Max(page, 1)
+            end if
+
+            totalCount = m.continueWatchingNode.content.getChildCount()
+            startIndex = (page - 1) * CONTINUE_WATCHING_PAGE_SIZE
+            if startIndex >= totalCount
+                response.Json([])
+                return true
+            end if
+
+            videoCount = MathUtils.Min(CONTINUE_WATCHING_PAGE_SIZE, totalCount - startIndex)
+            nodes = m.continueWatchingNode.content.getChildren(videoCount, startIndex)
+
+            videoIds = []
+            for each node in nodes
+                videoIds.push(node.videoId)
+            end for
+
+            instance = m.invidiousService.GetInstance()
+
+            videoRequests = []
+            for each videoId in videoIds
+                videoRequests.push(m.GetVideoMetadata(instance, videoId))
+            end for
+
+            videoResponses = []
+            for each videoRequest in videoRequests
+                videoResponses.push(videoRequest.Await())
+            end for
+
+            videos = []
+            for each videoResponse in videoResponses
+                if videoResponse.StatusCode() = 200
+                    videoInfo = videoResponse.Json()
+                    videoInfo.type = "video"
+                    ' Remove unnecessary fields, keep payload small
+                    videoInfo.Delete("adaptiveFormats")
+                    videoInfo.Delete("formatStreams")
+                    videoInfo.Delete("storyboards")
+                    videoInfo.Delete("recommendedVideos")
+                    videos.push(videoInfo)
+                end if
+            end for
+
+            response.Json(videos)
+            return true
+        end function
+
+        @delete("/api/continue-watching")
+        function ClearContinueWatching(context as object) as boolean
+            response = context.response
+
+            ContinueWatchingUtils.Clear(m.continueWatchingNode)
+
+            response.Default(204, "OK")
+            return true
+        end function
+
+        function GetVideoMetadata(instance as string, videoId as string, cancellation = invalid as object) as object
+            ' _playlet_ref=video_info so that we give it it's own cache that lasts longer
+            url = `${instance}${Invidious.VIDEOS_ENDPOINT}/${videoId}?_playlet_ref=video_info`
+
+            request = HttpClient.Get(url)
+            ' 3 days of cache
+            request.CacheSeconds(60 * 60 * 24 * 3)
+            request.Cancellation(cancellation)
+            ' Since we're doing multiple requests from the same thread, we might
+            ' benefit from HTTP/2 connection sharing
+            request.UseHttp2()
+
+            ' Send, and not await, since we are launching many requests at once
+            return request.Send()
+        end function
+
+    end class
+
+end namespace

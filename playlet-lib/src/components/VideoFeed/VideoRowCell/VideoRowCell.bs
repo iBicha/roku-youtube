@@ -11,6 +11,10 @@ function OnContentSet() as void
     content = m.top.itemContent
 
     if content = invalid
+        if m.progressNode <> invalid
+            m.progressNode.unobserveFieldScoped("timestamp")
+            m.progressNode = invalid
+        end if
         return
     end if
 
@@ -31,23 +35,27 @@ function OnContentSet() as void
 
     m.top.thumbnailUri = content.thumbnail
 
-    m.top.durationRectVisible = false
-    m.top.upcomingRectVisible = false
-    m.top.liveRectVisible = false
+    lengthSeconds = ValidInt(content.lengthSeconds)
+    hasLength = lengthSeconds <> 0
+    isUpcoming = not hasLength and content.isUpcoming = true
+    isLive = not hasLength and not isUpcoming and content.liveNow = true
 
-    if ValidInt(content.lengthSeconds) <> 0
+    m.top.durationRectVisible = hasLength
+    m.top.upcomingRectVisible = isUpcoming
+    m.top.liveRectVisible = isLive
+
+    if hasLength
         SetDurationText(content.lengthText)
-        m.top.durationRectVisible = true
-    else
-        if content.isUpcoming = true
-            m.top.upcomingRectVisible = true
-        else if content.liveNow
-            m.top.liveRectVisible = true
-        end if
     end if
+
+    SetupProgress(content)
 end function
 
 function SetDurationText(text as string) as void
+    if m.top.duration = text
+        return
+    end if
+
     m.top.duration = text
 
     label = m.durationLabel
@@ -65,3 +73,30 @@ function SetDurationText(text as string) as void
     rect.translation = [rectParent.width - rect.width, rect.translation[1]]
 end function
 
+function SetupProgress(content as object)
+    if m.progressNode <> invalid
+        m.progressNode.unobserveFieldScoped("timestamp")
+        m.progressNode = invalid
+    end if
+
+    m.progressNode = content.progressNode
+    if m.progressNode <> invalid
+        m.progressNode.observeFieldScoped("timestamp", FuncName(SetProgress))
+    end if
+    SetProgress()
+end function
+
+function SetProgress() as void
+    if m.progressNode = invalid
+        m.top.progressRectScale = [0, 1]
+        return
+    end if
+
+    duration = m.progressNode.duration
+    timestamp = m.progressNode.timestamp
+    progress = 0
+    if duration > 0
+        progress = timestamp / duration
+    end if
+    m.top.progressRectScale = [progress, 1]
+end function

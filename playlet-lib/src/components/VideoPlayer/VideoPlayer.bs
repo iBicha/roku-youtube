@@ -1,4 +1,5 @@
 import "pkg:/components/Dialog/DialogUtils.bs"
+import "pkg:/components/Services/ContinueWatching/ContinueWatchingUtils.bs"
 import "pkg:/components/Services/Invidious/InvidiousToContentNode.bs"
 import "pkg:/components/VideoPlayer/SponsorBlock.bs"
 import "pkg:/components/VideoPlayer/VideoPlayerStyle.bs"
@@ -7,6 +8,7 @@ import "pkg:/source/AsyncTask/AsyncTask.bs"
 import "pkg:/source/AsyncTask/Tasks.bs"
 import "pkg:/source/utils/ErrorUtils.bs"
 import "pkg:/source/utils/Logging.bs"
+import "pkg:/source/utils/MathUtils.bs"
 
 function Init()
     SetPlayerStyle()
@@ -24,7 +26,6 @@ function Init()
     ' This is used to prevent the video from playing the next video when we are
     ' still trying to find a working stream url
     m.ignoreNextFinishedState = false
-
     ' asyncStopSemantics available since Roku OS 12.5
     ' It is set to true because stopping synchronously causes timeout and crash
     ' Usually we would need to wait for the video state to move to "stopping" then to "stopped"
@@ -34,6 +35,10 @@ function Init()
     if m.top.hasField("asyncStopSemantics")
         m.top.asyncStopSemantics = true
     end if
+
+    m.videoPlayedToCompletion = false
+    m.lastProgressTimestamp = 0
+    m.lastSavedProgressTimestamp = 0
 end function
 
 function OnNodeReady()
@@ -73,6 +78,9 @@ function PlayWithContent(contentNode as object)
     if not StringUtils.IsNullOrEmpty(contentNode.author)
         videoContentNode.secondaryTitle = contentNode.author
     end if
+    if contentNode.progressNode <> invalid
+        m.progressNode = contentNode.progressNode
+    end if
 
     StartVideoContentTask(videoContentNode)
 end function
@@ -82,7 +90,7 @@ function StartVideoContentTask(videoContentNode as object)
         m.videoContentTask.cancel = true
     end if
 
-    MarkVideoWatched(videoContentNode.videoId)
+    MarkVideoWatched(videoContentNode)
 
     m.top.content = videoContentNode
 
@@ -117,24 +125,49 @@ function OnVideoContentTaskResults(output as object) as void
         return
     end if
 
-    SponsorBlock.FetchSponsorBlock(m.top.content.metadata)
+    content = m.top.content
+    metadata = content.metadata
+    timestamp = ValidInt(content.timestamp)
+    SponsorBlock.FetchSponsorBlock(metadata)
 
     m.top.control = "play"
-    if ValidInt(m.top.content.timestamp) > 0
-        m.top.seek = m.top.content.timestamp
+
+    if timestamp = 0 and m.progressNode <> invalid and ValidInt(m.progressNode.timestamp) > 0
+        timestamp = m.progressNode.timestamp
+    end if
+
+    if timestamp > 0
+        m.top.seek = timestamp
+    end if
+
+    if m.progressNode <> invalid
+        m.top.observeFieldScoped("position", FuncName(OnPositionChangeVideoProgress))
     end if
 end function
 
-function MarkVideoWatched(videoId as string)
+function MarkVideoWatched(videoContentNode as object)
     if m.top.invidious.authToken <> invalid
         AsyncTask.Start(Tasks.MarkVideoWatchedTask, {
-            videoId: videoId
+            videoId: videoContentNode.videoId
             invidious: m.top.invidious
         })
+    end if
+
+    if m.preferences["continue_watching.enabled"] = true
+        if m.progressNode = invalid
+            maxVideos = MathUtils.Min(ValidInt(m.preferences["continue_watching.max_videos"]), ContinueWatchingUtils.MAX_VIDEOS)
+            m.progressNode = ContinueWatchingUtils.GetOrCreateNodeForVideo(m.continueWatching, videoContentNode.videoId, maxVideos)
+        end if
+        ContinueWatchingUtils.MarkWatchDate(m.progressNode)
+        m.continueWatching.save = true
+    else
+        m.progressNode = invalid
     end if
 end function
 
 function Close(_unused as dynamic)
+    HandleProgressBeforeClose()
+
     if m.videoContentTask <> invalid
         m.videoContentTask.cancel = true
         m.videoContentTask = invalid
@@ -158,6 +191,59 @@ function Close(_unused as dynamic)
     end try
 
     m.top.content = invalid
+end function
+
+function HandleProgressBeforeClose() as void
+    progressNode = m.progressNode
+    if progressNode = invalid
+        return
+    end if
+    m.progressNode = invalid
+
+    if m.preferences["continue_watching.enabled"] <> true
+        return
+    end if
+
+    if not m.videoPlayedToCompletion
+        duration = progressNode.duration
+        timestamp = progressNode.timestamp
+        if duration > 0
+            timeLeft = duration - timestamp
+            percentageLeft = timeLeft / duration
+
+            ' If we are less than 5% away from the end of the video, and the what's left is less than 20 seconds
+            ' then we consider the video to be played to completion, to account for ending credits etc.
+            if percentageLeft < 0.05 and timeLeft < 20
+                m.videoPlayedToCompletion = true
+            end if
+        end if
+    end if
+
+    if not m.videoPlayedToCompletion
+        m.continueWatching.save = true
+        return
+    end if
+
+    content = m.top.content
+    if content = invalid
+        m.continueWatching.save = true
+        return
+    end if
+
+    metadata = content.metadata
+    if metadata = invalid
+        m.continueWatching.save = true
+        return
+    end if
+
+    videoId = metadata.videoId
+    if StringUtils.IsNullOrEmpty(videoId)
+        m.continueWatching.save = true
+        return
+    end if
+
+    ContinueWatchingUtils.RemoveNodeForVideo(m.continueWatching, videoId)
+    m.continueWatching.save = true
 end function
 
 function OnVideoPlayerStateChange() as void
@@ -232,6 +318,7 @@ function OnVideoPlayerStateChange() as void
 end function
 
 function OnVideoFinished() as void
+    m.videoPlayedToCompletion = true
     content = m.top.content
     if content = invalid
         m.playQueue@.watchedVideosClear()
@@ -281,7 +368,7 @@ function PlayNextRecommendedVideo(recommendedVideos as object) as boolean
         if not m.playQueue@.watchedVideosContain(videoId)
             LogInfo(`Playing next recommended video (${videoId})`)
             instance = m.invidious@.GetCurrentInstance()
-            node = InvidiousContent.ToVideoContentNode(invalid, metadata, instance)
+            node = InvidiousContent.ToVideoContentNode(invalid, metadata, instance, m.continueWatching.content)
             m.playQueue@.Play(node, -1)
             return true
         end if
@@ -366,4 +453,34 @@ function OnFullScreenHintTimer()
     if showFullScreenHint
         m.top.showFullScreenHint = false
     end if
+end function
+
+function OnPositionChangeVideoProgress() as void
+    currentPosition = Int(m.top.position)
+    ' Only update the progress node every 5 seconds.
+    ' Avoid updating this too often because it makes the ContentNode
+    ' one VideoRowCell nodes update.
+    if Abs(m.lastProgressTimestamp - currentPosition) < 5
+        return
+    end if
+    m.lastProgressTimestamp = currentPosition
+
+    progressNode = m.progressNode
+    if progressNode = invalid
+        return
+    end if
+
+    progressNode.timestamp = currentPosition
+    duration = m.top.duration
+    if duration > 0
+        progressNode.duration = Int(duration)
+    end if
+
+    ' Save the progress every 10 seconds
+    if Abs(m.lastSavedProgressTimestamp - currentPosition) < 10
+        return
+    end if
+    m.lastSavedProgressTimestamp = currentPosition
+
+    m.continueWatching.save = true
 end function

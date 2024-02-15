@@ -1,17 +1,21 @@
 <script lang="ts">
   import { PlayletApi } from "lib/Api/PlayletApi";
   import { userPreferencesStore } from "lib/Stores";
+
   const textSizes = ["text-2xl", "text-lg", "text-base", "text-sm", "text-xs"];
+
   export let displayText: string = "";
   export let key: string = "";
   export let description: string = "";
   export let level: number = 0;
   export let min: number = -999999;
   export let max: number = 999999;
+
   let value;
   userPreferencesStore.subscribe((userPreferences) => {
     value = userPreferences[key];
   });
+
   async function handleChange() {
     if (key !== "") {
       await PlayletApi.saveUserPreference(key, value);

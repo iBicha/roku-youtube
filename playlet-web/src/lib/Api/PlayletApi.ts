@@ -29,6 +29,11 @@ export class PlayletApi {
         return await response.json();
     }
 
+    static async getLocalVideoApiFile() {
+        const response = await fetch(`${PlayletApi.host()}/config/local_video_api.yaml`);
+        return await response.json();
+    }
+
     static async invidiousAuthenticatedRequest(feedSource) {
         const url = PlayletApi.host() + "/invidious/authenticated-request?feed-source=" + encodeURIComponent(JSON.stringify(feedSource));
         const response = await fetch(url);
@@ -118,6 +123,10 @@ export class PlayletApi {
 
     static async clearSearchHistory() {
         return await fetch(`${PlayletApi.host()}/api/search-history`, { method: "DELETE" });
+    }
+
+    static async clearContinueWatching() {
+        return await fetch(`${PlayletApi.host()}/api/continue-watching`, { method: "DELETE" });
     }
 
     static async getBookmarkFeeds() {

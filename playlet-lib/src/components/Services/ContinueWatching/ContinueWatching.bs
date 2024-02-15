@@ -1,0 +1,128 @@
+import "pkg:/components/Services/ContinueWatching/ContinueWatchingUtils.bs"
+import "pkg:/source/utils/Logging.bs"
+import "pkg:/source/utils/MathUtils.bs"
+import "pkg:/source/utils/RegistryUtils.bs"
+import "pkg:/source/utils/Types.bs"
+
+function Init()
+    m.top.content = m.top.findNode("content")
+    m.continueWatchingString = ""
+    ' For content changes, use a timer of one second to avoid rapid fire of events
+    m.changedEventTimer = CreateObject("roSGNode", "Timer")
+    m.changedEventTimer.duration = 1
+    m.changedEventTimer.ObserveField("fire", FuncName(TriggerChangedEvent))
+
+    m.top.content.observeField("change", FuncName(OnContentChange))
+end function
+
+function OnNodeReady()
+    Load()
+end function
+
+function Load() as void
+    isEnabled = m.preferences["continue_watching.enabled"] = true
+    if not isEnabled
+        return
+    end if
+
+    continueWatchingString = RegistryUtils.Read(RegistryUtils.CONTINUE_WATCHING)
+    if continueWatchingString = invalid
+        return
+    end if
+
+    m.continueWatchingString = continueWatchingString
+    continueWatching = ParseJson(continueWatchingString)
+    if continueWatching = invalid
+        LogWarn("Failed to parse continue watching json")
+        return
+    end if
+
+    expirationDays = ValidInt(m.preferences["continue_watching.expiration"])
+    maxVideos = MathUtils.Min(ValidInt(m.preferences["continue_watching.max_videos"]), ContinueWatchingUtils.MAX_VIDEOS)
+
+    nodes = []
+    for each video in continueWatching.videos
+        date = ValidInt(video.date)
+        if IsVideoExpired(date, expirationDays)
+            continue for
+        end if
+
+        node = CreateObject("roSGNode", "VideoProgressContentNode")
+        node.id = video.id
+        node.videoId = video.id
+        node.date = date
+        node.timestamp = ValidInt(video.timestamp)
+        node.duration = ValidInt(video.duration)
+        nodes.push(node)
+
+        if nodes.Count() >= maxVideos
+            exit for
+        end if
+    end for
+
+    content = m.top.content
+    content.removeChildrenIndex(content.getChildCount(), 0)
+    content.appendChildren(nodes)
+end function
+
+function Save() as void
+    nodes = m.top.content.getChildren(-1, 0)
+    if nodes.Count() = 0
+        RegistryUtils.Delete(RegistryUtils.CONTINUE_WATCHING)
+        return
+    end if
+
+    videos = []
+    for each node in nodes
+        video = {}
+        video.id = node.videoId
+        video.date = node.date
+        video.timestamp = node.timestamp
+        video.duration = node.duration
+        videos.push(video)
+    end for
+
+    videos.SortBy("date", "r")
+
+    ' The registry has a limit of 32KB, so we need to limit the number of videos
+    maxVideos = MathUtils.Min(ValidInt(m.preferences["continue_watching.max_videos"]), ContinueWatchingUtils.MAX_VIDEOS)
+    while videos.Count() > maxVideos
+        videos.pop()
+    end while
+
+    continueWatchingString = FormatJson({
+        "__version": m.top.__version
+        "videos": videos
+    })
+
+    if m.continueWatchingString = continueWatchingString
+        return
+    end if
+
+    RegistryUtils.Write(RegistryUtils.CONTINUE_WATCHING, continueWatchingString)
+    m.continueWatchingString = continueWatchingString
+end function
+
+function IsVideoExpired(watchDateInSeconds as integer, expirationDays as integer) as boolean
+    if watchDateInSeconds = 0 or expirationDays = 0
+        LogWarn("Invalid watch date:", watchDateInSeconds, "or expiration days:", expirationDays)
+        return false
+    end if
+
+    now = CreateObject("roDateTime")
+    nowSeconds = now.AsSeconds()
+
+    return nowSeconds - watchDateInSeconds > expirationDays * 24 * 60 * 60
+end function
+
+function OnContentChange(event as object)
+    change = event.getData()
+    if change.Operation <> "modify"
+        m.changedEventTimer.control = "stop"
+        m.changedEventTimer.control = "start"
+    end if
+end function
+
+function TriggerChangedEvent()
+    m.top.changed = true
+end function

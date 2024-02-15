@@ -1,6 +1,7 @@
 <script lang="ts">
   import BooleanControl from "lib/Screens/Settings/SettingControls/BooleanControl.svelte";
   import ClearSearchHistoryControl from "lib/Screens/Settings/SettingControls/ClearSearchHistoryControl.svelte";
+  import ClearContinueWatchingControl from "lib/Screens/Settings/SettingControls/ClearContinueWatchingControl.svelte";
   import EditHomeScreenControl from "lib/Screens/Settings/SettingControls/EditHomeScreenControl.svelte";
   import RadioControl from "lib/Screens/Settings/SettingControls/RadioControl.svelte";
   import StringControl from "lib/Screens/Settings/SettingControls/StringControl.svelte";
@@ -28,6 +29,7 @@
 
   const customComponents = {
     ClearSearchHistoryControl,
+    ClearContinueWatchingControl,
     EditHomeScreenControl,
   };
 </script>
